@@ -1,0 +1,26 @@
+server:
+  port: 8080
+  tomcat.max-http-form-post-size: 50MB
+spring:
+  data.mongodb.uri: ${MONGO_URI:mongodb://localhost:27017/thread}
+  servlet.multipart.max-request-size: 50MB
+  mail:
+    host: ${EMAIL_HOST:smtp.gmail.com}
+    port: ${EMAIL_PORT:587}
+    username: ${EMAIL_USER:k42621508@gmail.com}
+    password: ${EMAIL_PASSWORD:Krishna@2004}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+twilio:
+  account-sid: ${TWILIO_ACCOUNT_SID:}
+  auth-token: ${TWILIO_AUTH_TOKEN:}
+  verify-service-sid: ${TWILIO_VERIFY_SERVICE_SID:}
+thread:
+  jwt-secret: ${JWT_SECRET:change-me-please-use-a-long-random-secret-32+chars}
+  admin-password: ${ADMIN_PASSWORD:admin123}
+  cors-origins: ${CORS_ORIGINS:http://localhost:5173,http://localhost:5174}
+

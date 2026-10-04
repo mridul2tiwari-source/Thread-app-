@@ -1,0 +1,42 @@
+
+<div id="login"><div class="lg">
+<h1>Thread Admin</h1><p>Sign in to manage users, reports and announcements.</p>
+<input id="pw" type="password" placeholder="Admin password" autocomplete="off" onkeydown="if(event.key==='Enter')signIn()">
+<div id="err" role="alert"></div><button type="button" class="btn" style="width:100%" onclick="signIn()">Sign in</button>
+<p style="margin-top:14px;font-size:12.5px">Demo password: <b>admin123</b>. Change it in the code before going live.</p></div></div>
+
+<div id="app">
+<aside><div class="brand"><i>T</i><div>Thread<br><small>Admin</small></div></div>
+<button type="button" class="n jump" onclick="pal(1)"><span>Jump to&hellip;</span><kbd>Ctrl K</kbd></button>
+<button class="n on" data-p="over">Overview</button>
+<div class="gl">People</div>
+<button class="n" data-p="users">Users</button>
+<button class="n" data-p="tick">Celebrity ticks <span class="b" id="tkn" style="display:none"></span></button>
+<button class="n" data-p="reps">Reports <span class="b" id="rb"></span></button>
+<div class="gl">Content</div>
+<button class="n" data-p="lib">Library</button>
+<button class="n" data-p="cast">Announcements</button>
+<div class="gl">App</div>
+<button class="n" data-p="ctl">Controls</button>
+<button class="n" data-p="prem">Premium</button>
+<button class="n" data-p="set">Settings</button>
+<div class="gl">Legal &amp; safety</div>
+<button class="n" data-p="priv">Privacy policy <span class="b w" id="bp" style="display:none"></span></button>
+<button class="n" data-p="terms">Terms of service <span class="b w" id="bt" style="display:none"></span></button>
+<button class="n" data-p="safe">Safety center</button>
+<button class="n out" onclick="signOut()">Sign out</button></aside>
+<main id="main"></main></div>
+<div id="mod"><div class="bx"><h3 id="mt"></h3><p id="mx"></p><div class="ac"><button class="btn g sm" onclick="mc()">Cancel</button><button class="btn sm" id="mok"></button></div></div></div>
+<div id="pal" onclick="if(event.target===this)pal(0)"><div class="bx"><input id="pq" placeholder="Jump to a page or action" autocomplete="off" aria-label="Jump to" oninput="PI=0;pfil()"><div id="pl"></div></div></div>
+<div id="toast"></div>
+
+
+
+
+
+
+
+
+
+
+
