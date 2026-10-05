@@ -1,4 +1,5 @@
-import { tok, call } from './api.js';
+import { tok } from './api.js';
+import { supabase } from './lib/supabaseClient.js';
 
 export async function applyOverrides(tokenProp) {
   const token = tokenProp || tok.get('thread_user_jwt');
@@ -100,7 +101,8 @@ export async function applyOverrides(tokenProp) {
     }
 
     // Call API to find user
-    call(`/users/${username}`, {token}).then(user => {
+    supabase.from('users').select('*').eq('name', username).single().then(({ data: user }) => {
+        if (!user) return;
       document.getElementById('qs-ok').classList.add('show');
       document.getElementById('qs-ok-t').textContent = 'Joined successfully!';
       document.getElementById('qs-ok-x').textContent = `You are now connected with ${user.name}`;
@@ -369,11 +371,11 @@ export async function applyOverrides(tokenProp) {
             if (isOn) {
                 sw.classList.remove('on');
                 tok.set('thread_syskb', '0');
-                call('/users/me/settings', { method: 'PUT', body: { systemKeyboard: false }, token });
+                supabase.auth.updateUser({ data: { systemKeyboard: false } });
             } else {
                 sw.classList.add('on');
                 tok.set('thread_syskb', '1');
-                call('/users/me/settings', { method: 'PUT', body: { systemKeyboard: true }, token });
+                supabase.auth.updateUser({ data: { systemKeyboard: true } });
             }
             applyKeyboardSetting();
         };
@@ -405,9 +407,9 @@ export async function applyOverrides(tokenProp) {
   }
   
   if (token) {
-    call('/auth/me', { token }).then(res => {
-        if(res && res.user && res.user.systemKeyboard !== undefined) {
-            tok.set('thread_syskb', res.user.systemKeyboard ? '1' : '0');
+    supabase.auth.getUser().then(({ data: { user } }) => {
+        if(user && user.user_metadata && user.user_metadata.systemKeyboard !== undefined) {
+            tok.set('thread_syskb', user.user_metadata.systemKeyboard ? '1' : '0');
             applyKeyboardSetting();
         }
     }).catch(e => {});

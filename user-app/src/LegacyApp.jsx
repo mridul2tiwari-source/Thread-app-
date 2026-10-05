@@ -1,4 +1,5 @@
-import {useEffect, useRef} from 'react';
+import {useEffect, useRef, useState} from 'react';
+import { createPortal } from 'react-dom';
 import { useGoogleLogin } from '@react-oauth/google';
 import body from './legacy/body.html?raw';
 import scripts from './legacy/scripts.json';
@@ -7,6 +8,8 @@ import './legacy/legacy.css';
 import {initChatClient} from './chatClient';
 import {tok, call} from './api';
 import { applyOverrides } from './overrides';
+import { supabase } from './lib/supabaseClient';
+import ThreadFeed from './components/ThreadFeed';
 
 function run(code){const s=document.createElement('script');s.text=code;document.body.appendChild(s);s.remove()}
 function load(src){return new Promise(r=>{const s=document.createElement('script');s.src=src;s.onload=s.onerror=r;document.head.appendChild(s)})}
@@ -210,6 +213,7 @@ window.submitOtpVerification = function() {
 
 export default function LegacyApp({token, onTokenChange}){
   const containerRef = useRef(null);
+  const [postsNode, setPostsNode] = useState(null);
 
   const triggerGoogleLogin = useGoogleLogin({
     onSuccess: async (tokenResponse) => {
@@ -286,6 +290,7 @@ export default function LegacyApp({token, onTokenChange}){
           try { run(c); } catch (e) { console.error(e); }
         }
         applyOverrides(token);
+        setPostsNode(document.getElementById('posts'));
         document.dispatchEvent(new Event('DOMContentLoaded'));
         window.dispatchEvent(new Event('load'));
       }
@@ -326,43 +331,37 @@ export default function LegacyApp({token, onTokenChange}){
         }, 350);
       };
 
-      if (activeToken) {
-        // Validate session with backend /auth/me
-        call('/auth/me', { token: activeToken })
-          .then((res) => {
-            if (res && res.user) {
-              tok.set('thread_user_data', JSON.stringify(res.user));
-              updateProfileUI(res.user);
-            }
-            initChatClient(activeToken);
+      // Check Supabase session natively
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session) {
+          const user = session.user;
+          const userData = {
+            id: user.id,
+            email: user.email,
+            name: user.user_metadata?.full_name || user.email.split('@')[0],
+            avatar: user.user_metadata?.avatar_url || ''
+          };
+          tok.set('thread_user_jwt', session.access_token);
+          tok.set('thread_user_data', JSON.stringify(userData));
+          updateProfileUI(userData);
+          initChatClient(session.access_token);
 
-            if (typeof window.finishAuthentication === 'function') {
-              window.finishAuthentication();
-            }
-            hideSplashSmoothly();
-          })
-          .catch((err) => {
-            console.warn('Session expired or invalid, directing to login:', err);
-            tok.del('thread_user_jwt');
-            tok.del('thread_user_data');
-            try { sessionStorage.removeItem('thread-authenticated'); } catch(e) {}
-            if (onTokenChange) onTokenChange(null);
-            
-            hideSplashSmoothly(() => {
-              if (origGo) origGo('screen-onboarding');
-            });
+          if (typeof window.finishAuthentication === 'function') {
+            window.finishAuthentication();
+          }
+          hideSplashSmoothly();
+        } else {
+          // No session exists, go straight to login
+          hideSplashSmoothly(() => {
+            if (origGo) origGo('screen-onboarding');
           });
-      } else {
-        // No session exists, go straight to login
-        hideSplashSmoothly(() => {
-          if (origGo) origGo('screen-onboarding');
-        });
-      }
+        }
+      });
 
       // ─── LOGOUT HANDLER ───────────────────────────────────────────────────
       window.stLogout = async function() {
         try {
-          await call('/auth/logout', { method: 'POST' });
+          await supabase.auth.signOut();
         } catch (e) {}
         if (typeof window.closeSheet === 'function') window.closeSheet('set-sheet');
         tok.del('thread_user_jwt');
@@ -455,10 +454,12 @@ export default function LegacyApp({token, onTokenChange}){
         if (btn) { btn.disabled = true; btn.textContent = 'Sending email code…'; }
 
         try {
-          const res = await call('/auth/register', {
-            method: 'POST',
-            body: { name, email, password, confirmPassword }
+          const { error } = await supabase.auth.signUp({
+            email,
+            password,
+            options: { data: { full_name: name } }
           });
+          if (error) throw error;
 
           _pendingReg = { name, email, password, confirmPassword };
           window.otpContext = 'register';
@@ -500,27 +501,33 @@ export default function LegacyApp({token, onTokenChange}){
         if (btn) { btn.disabled = true; btn.textContent = 'Logging in…'; }
 
         try {
-          const res = await call('/auth/login', {
-            method: 'POST',
-            body: { email, password }
+          const { data, error } = await supabase.auth.signInWithPassword({
+            email, password
           });
+          if (error) throw error;
 
-          if (res && res.token) {
-            tok.set('thread_user_jwt', res.token);
-            if (res.user) {
-              tok.set('thread_user_data', JSON.stringify(res.user));
-              updateProfileUI(res.user);
-            }
-            if (onTokenChange) onTokenChange(res.token);
-            setTimeout(() => initChatClient(res.token), 100);
+          if (data && data.session) {
+            const user = data.session.user;
+            const userData = {
+              id: user.id,
+              email: user.email,
+              name: user.user_metadata?.full_name || user.email.split('@')[0],
+              avatar: user.user_metadata?.avatar_url || ''
+            };
+            tok.set('thread_user_jwt', data.session.access_token);
+            tok.set('thread_user_data', JSON.stringify(userData));
+            updateProfileUI(userData);
+            
+            if (onTokenChange) onTokenChange(data.session.access_token);
+            setTimeout(() => initChatClient(data.session.access_token), 100);
             if (typeof window.finishAuthentication === 'function') {
               window.finishAuthentication('login');
             } else {
               const goFn = window.go || (typeof go !== 'undefined' ? go : null);
               if (goFn) goFn('screen-feed');
             }
-            }
-          } catch (err) {
+          }
+        } catch (err) {
           console.error('Login error:', err);
           setErrMsg('screen-login', 'login-err', err.message || 'Invalid email or password.');
         } finally {
@@ -546,10 +553,11 @@ export default function LegacyApp({token, onTokenChange}){
         if (resendBtn) resendBtn.textContent = 'Sending…';
 
         try {
-          const res = await call('/auth/resend-otp', {
-            method: 'POST',
-            body: { email: targetEmail, purpose }
+          const { error } = await supabase.auth.resend({
+            type: purpose === 'SIGNUP' ? 'signup' : 'recovery',
+            email: targetEmail
           });
+          if (error) throw error;
 
           if (errEl) {
             errEl.textContent = res.message || 'A new verification code has been sent to your email.';
@@ -580,24 +588,28 @@ export default function LegacyApp({token, onTokenChange}){
 
         if (window.otpContext === 'register') {
           try {
-            const res = await call('/auth/verify-email', {
-              method: 'POST',
-              body: {
-                email: _pendingReg.email,
-                otp: val
-              }
+            const { data, error } = await supabase.auth.verifyOtp({
+              email: _pendingReg.email,
+              token: val,
+              type: 'signup'
             });
+            if (error) throw error;
 
-            if (res && res.token) {
+            if (data && data.session) {
               clearInterval(_otpCountdownTimer);
               otpInputs.forEach(i => i.classList.add('correct'));
-              tok.set('thread_user_jwt', res.token);
-              if (res.user) {
-                tok.set('thread_user_data', JSON.stringify(res.user));
-                updateProfileUI(res.user);
-              }
-              if (onTokenChange) onTokenChange(res.token);
-              setTimeout(() => initChatClient(res.token), 100);
+              tok.set('thread_user_jwt', data.session.access_token);
+              const user = data.session.user;
+              const userData = {
+                id: user.id,
+                email: user.email,
+                name: user.user_metadata?.full_name || user.email.split('@')[0],
+                avatar: user.user_metadata?.avatar_url || ''
+              };
+              tok.set('thread_user_data', JSON.stringify(userData));
+              updateProfileUI(userData);
+              if (onTokenChange) onTokenChange(data.session.access_token);
+              setTimeout(() => initChatClient(data.session.access_token), 100);
 
               setTimeout(() => {
                 const goFn = window.go || (typeof go !== 'undefined' ? go : null);
@@ -617,21 +629,21 @@ export default function LegacyApp({token, onTokenChange}){
           }
         } else if (window.otpContext === 'reset') {
           try {
-            const res = await call('/auth/verify-reset-otp', {
-              method: 'POST',
-              body: { email: _resetEmail, otp: val }
+            const { error } = await supabase.auth.verifyOtp({
+              email: _resetEmail,
+              token: val,
+              type: 'recovery'
             });
+            if (error) throw error;
 
-            if (res && res.valid) {
-              clearInterval(_otpCountdownTimer);
-              _resetOtp = val;
-              otpInputs.forEach(i => i.classList.add('correct'));
-              setTimeout(() => {
-                const goFn = window.go || (typeof go !== 'undefined' ? go : null);
-                if (goFn) goFn('screen-reset-password');
-              }, 400);
-              return;
-            }
+            clearInterval(_otpCountdownTimer);
+            _resetOtp = val;
+            otpInputs.forEach(i => i.classList.add('correct'));
+            setTimeout(() => {
+              const goFn = window.go || (typeof go !== 'undefined' ? go : null);
+              if (goFn) goFn('screen-reset-password');
+            }, 400);
+            return;
           } catch (err) {
             console.error('Reset OTP verify error:', err);
             if (errEl) {
@@ -658,32 +670,13 @@ export default function LegacyApp({token, onTokenChange}){
         const goFn = window.go || (typeof go !== 'undefined' ? go : null);
 
         try {
-          const res = await call('/auth/google', {
-            method: 'POST',
-            body: {
-              name: account.name,
-              email: account.email,
-              avatar: account.avatar || '',
-              accessToken: account.accessToken
+          const { error } = await supabase.auth.signInWithOAuth({
+            provider: 'google',
+            options: {
+              redirectTo: window.location.origin
             }
           });
-
-          if (res && res.token) {
-            tok.set('thread_user_jwt', res.token);
-            if (res.user) {
-              tok.set('thread_user_data', JSON.stringify(res.user));
-              updateProfileUI(res.user);
-            }
-            if (onTokenChange) onTokenChange(res.token);
-            setTimeout(() => initChatClient(res.token), 100);
-
-            // Always go to feed — works for both new and returning Google users
-            if (typeof window.finishAuthentication === 'function') {
-              window.finishAuthentication('google');
-            } else if (goFn) {
-              goFn('screen-feed');
-            }
-          }
+          if (error) throw error;
         } catch (err) {
           console.error('Google Auth error:', err);
           // Restore button state
@@ -738,10 +731,8 @@ export default function LegacyApp({token, onTokenChange}){
         if (btn) { btn.disabled = true; btn.textContent = 'Sending code…'; }
 
         try {
-          const res = await call('/auth/forgot-password', {
-            method: 'POST',
-            body: { email }
-          });
+          const { error } = await supabase.auth.resetPasswordForEmail(email);
+          if (error) throw error;
 
           _resetEmail = email;
           window.otpContext = 'reset';
@@ -798,15 +789,8 @@ export default function LegacyApp({token, onTokenChange}){
         if (btn) { btn.disabled = true; btn.textContent = 'Updating password…'; }
 
         try {
-          const res = await call('/auth/reset-password', {
-            method: 'POST',
-            body: {
-              email: _resetEmail,
-              otp: _resetOtp,
-              password: newPass,
-              confirmPassword: confPass
-            }
-          });
+          const { error } = await supabase.auth.updateUser({ password: newPass });
+          if (error) throw error;
 
           const goFn = window.go || (typeof go !== 'undefined' ? go : null);
           if (goFn) {
@@ -831,5 +815,9 @@ export default function LegacyApp({token, onTokenChange}){
     bootApp();
   }, [token]);
 
-  return <div ref={containerRef} style={{width:'100%', height:'100%'}} />;
+  return (
+    <div ref={containerRef} style={{width:'100%', height:'100%'}}>
+      {postsNode && createPortal(<ThreadFeed />, postsNode)}
+    </div>
+  );
 }
