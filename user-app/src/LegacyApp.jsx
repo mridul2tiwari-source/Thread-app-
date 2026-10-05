@@ -6,6 +6,7 @@ import ext from './legacy/ext.json';
 import './legacy/legacy.css';
 import {initChatClient} from './chatClient';
 import {tok, call} from './api';
+import { applyOverrides } from './overrides';
 
 function run(code){const s=document.createElement('script');s.text=code;document.body.appendChild(s);s.remove()}
 function load(src){return new Promise(r=>{const s=document.createElement('script');s.src=src;s.onload=s.onerror=r;document.head.appendChild(s)})}
@@ -14,11 +15,9 @@ let host = null;
 let booted = false;
 
 // ── State for Auth Flows ───────────────────────────────────────────────────
-let _pendingReg = { name: '', email: '', phone: '', password: '', confirmPassword: '' };
+let _pendingReg = { name: '', email: '', password: '', confirmPassword: '' };
 let _loginEmail = '';
-let _loginPhone = '';
 let _resetEmail = '';
-let _resetPhone = '';
 let _resetOtp = '';
 let _otpCountdownTimer = null;
 
@@ -218,12 +217,52 @@ export default function LegacyApp({token, onTokenChange}){
         const userInfo = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
           headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
         }).then(res => res.json());
+
+        if (!userInfo || !userInfo.email) {
+          throw new Error('Could not retrieve your Google account info.');
+        }
+
         if (window.handleGoogleAuth) {
-           window.handleGoogleAuth({ name: userInfo.name, email: userInfo.email, avatar: userInfo.picture });
+          window.handleGoogleAuth({
+            name: userInfo.name || userInfo.email.split('@')[0],
+            email: userInfo.email,
+            avatar: userInfo.picture || ''
+          });
         }
       } catch (e) {
         console.error('Failed to fetch google user info', e);
+        // Restore button state
+        document.querySelectorAll('.btn-google').forEach(b => {
+          b.disabled = false;
+          b.style.opacity = '';
+          b.style.pointerEvents = '';
+        });
+        const errMsg = e.message || 'Google sign-in failed. Please try again.';
+        // Show error near the active auth screen
+        const activeErr = document.querySelector('.screen.active .err[id*="err"]');
+        if (activeErr) {
+          activeErr.textContent = errMsg;
+          activeErr.style.display = 'block';
+          activeErr.style.color = '#ff4d4f';
+        }
       }
+    },
+    onError: (err) => {
+      console.warn('Google OAuth error or cancelled:', err);
+      // Restore button state — user may have just closed the popup
+      document.querySelectorAll('.btn-google').forEach(b => {
+        b.disabled = false;
+        b.style.opacity = '';
+        b.style.pointerEvents = '';
+      });
+    },
+    onNonOAuthError: (err) => {
+      console.warn('Google non-OAuth error:', err);
+      document.querySelectorAll('.btn-google').forEach(b => {
+        b.disabled = false;
+        b.style.opacity = '';
+        b.style.pointerEvents = '';
+      });
     }
   });
 
@@ -245,6 +284,7 @@ export default function LegacyApp({token, onTokenChange}){
         for (const c of scripts) {
           try { run(c); } catch (e) { console.error(e); }
         }
+        applyOverrides(token);
         document.dispatchEvent(new Event('DOMContentLoaded'));
         window.dispatchEvent(new Event('load'));
       }
@@ -270,6 +310,21 @@ export default function LegacyApp({token, onTokenChange}){
         if (origGo) return origGo(id);
       };
 
+      const hideSplashSmoothly = (callback) => {
+        const sp = document.getElementById('screen-splash');
+        const lp = document.getElementById('launch-page');
+        document.documentElement.classList.remove('thread-booting');
+        
+        if (lp) lp.classList.add('finished');
+        if (callback) callback();
+        if (sp) sp.classList.add('active'); // ensure it stays active during transition
+        
+        setTimeout(() => {
+          if (sp) sp.classList.remove('active');
+          if (lp) lp.classList.remove('finished');
+        }, 350);
+      };
+
       if (activeToken) {
         // Validate session with backend /auth/me
         call('/auth/me', { token: activeToken })
@@ -280,17 +335,10 @@ export default function LegacyApp({token, onTokenChange}){
             }
             initChatClient(activeToken);
 
-            const sp = document.getElementById('screen-splash');
-            const lp = document.getElementById('launch-page');
-            if (lp) lp.classList.add('finished');
-            document.documentElement.classList.remove('thread-booting');
             if (typeof window.finishAuthentication === 'function') {
               window.finishAuthentication();
             }
-            setTimeout(() => {
-              if (sp) sp.classList.remove('active');
-              if (lp) lp.classList.remove('finished');
-            }, 350);
+            hideSplashSmoothly();
           })
           .catch((err) => {
             console.warn('Session expired or invalid, directing to login:', err);
@@ -298,10 +346,16 @@ export default function LegacyApp({token, onTokenChange}){
             tok.del('thread_user_data');
             try { sessionStorage.removeItem('thread-authenticated'); } catch(e) {}
             if (onTokenChange) onTokenChange(null);
-            const sp = document.getElementById('screen-splash');
-            if (sp) sp.classList.remove('active');
-            if (origGo) origGo('screen-onboarding');
+            
+            hideSplashSmoothly(() => {
+              if (origGo) origGo('screen-onboarding');
+            });
           });
+      } else {
+        // No session exists, go straight to login
+        hideSplashSmoothly(() => {
+          if (origGo) origGo('screen-onboarding');
+        });
       }
 
       // ─── LOGOUT HANDLER ───────────────────────────────────────────────────
@@ -369,24 +423,18 @@ export default function LegacyApp({token, onTokenChange}){
         setTimeout(syncPostButtons, 60);
       };
 
-      // ─── 1. SUBMIT REGISTER (SIGN UP FLOW WITH REAL SMS OTP) ──────────────
+      // ─── 1. SUBMIT REGISTER (SIGN UP FLOW WITH EMAIL OTP) ──────────────
       window.submitRegister = async function(e) {
         if (e && e.preventDefault) e.preventDefault();
         setErrMsg('screen-register', 'reg-err', '');
 
         const name = document.getElementById('reg-name')?.value?.trim() || 'User';
         const email = document.getElementById('reg-email')?.value?.trim().toLowerCase() || '';
-        const phone = document.getElementById('reg-phone')?.value?.trim() || '';
         const password = document.getElementById('reg-pass')?.value || '';
         const confirmPassword = document.getElementById('reg-confirm-pass')?.value || '';
 
         if (!email) {
           setErrMsg('screen-register', 'reg-err', 'Please enter a valid email address.');
-          return;
-        }
-
-        if (!phone) {
-          setErrMsg('screen-register', 'reg-err', 'Enter a valid phone number.');
           return;
         }
 
@@ -403,24 +451,24 @@ export default function LegacyApp({token, onTokenChange}){
 
         const btn = document.getElementById('reg-submit-btn');
         const origBtnText = btn ? btn.textContent : 'Create Account';
-        if (btn) { btn.disabled = true; btn.textContent = 'Sending SMS code…'; }
+        if (btn) { btn.disabled = true; btn.textContent = 'Sending email code…'; }
 
         try {
           const res = await call('/auth/register', {
             method: 'POST',
-            body: { name, email, phone, password, confirmPassword }
+            body: { name, email, password, confirmPassword }
           });
 
-          _pendingReg = { name, email, phone: res.phone || phone, password, confirmPassword };
+          _pendingReg = { name, email, password, confirmPassword };
           window.otpContext = 'register';
 
           const goFn = window.go || (typeof go !== 'undefined' ? go : null);
           if (goFn) {
             goFn('screen-otp');
             const titleEl = document.getElementById('otp-title');
-            if (titleEl) titleEl.textContent = 'Verify your phone';
+            if (titleEl) titleEl.textContent = 'Verify your email';
             const copyEl = document.getElementById('otp-copy');
-            if (copyEl) copyEl.textContent = `Enter the 6-digit code sent to ${res.phone || phone}`;
+            if (copyEl) copyEl.textContent = `Enter the 6-digit code sent to ${email}`;
             const errEl = document.getElementById('otp-err-msg');
             if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
             startOtpCountdown(60);
@@ -433,7 +481,7 @@ export default function LegacyApp({token, onTokenChange}){
         }
       };
 
-      // ─── 2. SUBMIT LOGIN (CREDENTIAL CHECK & 2FA SMS OTP) ──────────────────
+      // ─── 2. SUBMIT LOGIN (CREDENTIAL CHECK ONLY) ──────────────────
       window.submitLogin = async function(e) {
         if (e && e.preventDefault) e.preventDefault();
         setErrMsg('screen-login', 'login-err', '');
@@ -442,7 +490,7 @@ export default function LegacyApp({token, onTokenChange}){
         const password = document.getElementById('login-pass')?.value || '';
 
         if (!email || !password) {
-          setErrMsg('screen-login', 'login-err', 'Please enter your email/phone and password.');
+          setErrMsg('screen-login', 'login-err', 'Please enter your email and password.');
           return;
         }
 
@@ -457,7 +505,6 @@ export default function LegacyApp({token, onTokenChange}){
           });
 
           if (res && res.token) {
-            // Direct token login (legacy user without phone requirement)
             tok.set('thread_user_jwt', res.token);
             if (res.user) {
               tok.set('thread_user_data', JSON.stringify(res.user));
@@ -467,23 +514,6 @@ export default function LegacyApp({token, onTokenChange}){
             setTimeout(() => initChatClient(res.token), 100);
             const goFn = window.go || (typeof go !== 'undefined' ? go : null);
             if (goFn) goFn('screen-login-success');
-            return;
-          }
-
-          _loginEmail = email;
-          _loginPhone = res.phone || '';
-          window.otpContext = 'login';
-
-          const goFn = window.go || (typeof go !== 'undefined' ? go : null);
-          if (goFn) {
-            goFn('screen-otp');
-            const titleEl = document.getElementById('otp-title');
-            if (titleEl) titleEl.textContent = 'Verify Login';
-            const copyEl = document.getElementById('otp-copy');
-            if (copyEl) copyEl.textContent = `We've sent a verification code to ${_loginPhone || 'your registered phone'}`;
-            const errEl = document.getElementById('otp-err-msg');
-            if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
-            startOtpCountdown(60);
           }
         } catch (err) {
           console.error('Login error:', err);
@@ -497,20 +527,13 @@ export default function LegacyApp({token, onTokenChange}){
       window.resendOtpCode = async function() {
         const errEl = document.getElementById('otp-err-msg');
         let targetEmail = '';
-        let targetPhone = '';
         let purpose = 'SIGNUP';
 
-        if (window.otpContext === 'login') {
-          targetEmail = _loginEmail;
-          targetPhone = _loginPhone;
-          purpose = 'LOGIN';
-        } else if (window.otpContext === 'reset') {
+        if (window.otpContext === 'reset') {
           targetEmail = _resetEmail;
-          targetPhone = _resetPhone;
           purpose = 'PASSWORD_RESET';
         } else {
           targetEmail = _pendingReg.email;
-          targetPhone = _pendingReg.phone;
           purpose = 'SIGNUP';
         }
 
@@ -520,11 +543,11 @@ export default function LegacyApp({token, onTokenChange}){
         try {
           const res = await call('/auth/resend-otp', {
             method: 'POST',
-            body: { email: targetEmail, phone: targetPhone, purpose }
+            body: { email: targetEmail, purpose }
           });
 
           if (errEl) {
-            errEl.textContent = res.message || 'A new verification code has been sent to your phone.';
+            errEl.textContent = res.message || 'A new verification code has been sent to your email.';
             errEl.style.display = 'block';
             errEl.style.color = '#4caf50';
           }
@@ -540,7 +563,7 @@ export default function LegacyApp({token, onTokenChange}){
         }
       };
 
-      // ─── 4. VERIFY OTP (SIGNUP, LOGIN, OR RESET) ───────────────────────────
+      // ─── 4. VERIFY OTP (SIGNUP OR RESET) ───────────────────────────
       window.checkOtp = async function(val) {
         const row = document.getElementById('otp-row');
         const otpInputs = Array.from(document.querySelectorAll('.otp-box'));
@@ -552,13 +575,10 @@ export default function LegacyApp({token, onTokenChange}){
 
         if (window.otpContext === 'register') {
           try {
-            const res = await call('/auth/verify-phone', {
+            const res = await call('/auth/verify-email', {
               method: 'POST',
               body: {
-                name: _pendingReg.name,
                 email: _pendingReg.email,
-                phone: _pendingReg.phone,
-                password: _pendingReg.password,
                 otp: val
               }
             });
@@ -590,62 +610,6 @@ export default function LegacyApp({token, onTokenChange}){
           } finally {
             if (verifyBtn) { verifyBtn.disabled = false; verifyBtn.textContent = 'Verify Code'; }
           }
-
-          otpInputs.forEach(i => i.classList.add('wrong'));
-          if (row) row.classList.add('shake');
-          setTimeout(() => {
-            if (row) row.classList.remove('shake');
-            otpInputs.forEach(i => { i.classList.remove('wrong'); i.value = ''; });
-            otpInputs[0]?.focus();
-          }, 500);
-
-        } else if (window.otpContext === 'login') {
-          try {
-            const res = await call('/auth/verify-login', {
-              method: 'POST',
-              body: {
-                email: _loginEmail,
-                phone: _loginPhone,
-                otp: val
-              }
-            });
-
-            if (res && res.token) {
-              clearInterval(_otpCountdownTimer);
-              otpInputs.forEach(i => i.classList.add('correct'));
-              tok.set('thread_user_jwt', res.token);
-              if (res.user) {
-                tok.set('thread_user_data', JSON.stringify(res.user));
-                updateProfileUI(res.user);
-              }
-              if (onTokenChange) onTokenChange(res.token);
-              setTimeout(() => initChatClient(res.token), 100);
-
-              setTimeout(() => {
-                const goFn = window.go || (typeof go !== 'undefined' ? go : null);
-                if (goFn) goFn('screen-login-success');
-              }, 400);
-              return;
-            }
-          } catch (err) {
-            console.error('Login OTP verify error:', err);
-            if (errEl) {
-              errEl.textContent = err.message || 'Invalid verification code.';
-              errEl.style.display = 'block';
-              errEl.style.color = '#ff4d4f';
-            }
-          } finally {
-            if (verifyBtn) { verifyBtn.disabled = false; verifyBtn.textContent = 'Verify Code'; }
-          }
-
-          otpInputs.forEach(i => i.classList.add('wrong'));
-          if (row) row.classList.add('shake');
-          setTimeout(() => {
-            if (row) row.classList.remove('shake');
-            otpInputs.forEach(i => { i.classList.remove('wrong'); i.value = ''; });
-            otpInputs[0]?.focus();
-          }, 500);
-
         } else if (window.otpContext === 'reset') {
           try {
             const res = await call('/auth/verify-reset-otp', {
@@ -673,26 +637,28 @@ export default function LegacyApp({token, onTokenChange}){
           } finally {
             if (verifyBtn) { verifyBtn.disabled = false; verifyBtn.textContent = 'Verify Code'; }
           }
-
-          otpInputs.forEach(i => i.classList.add('wrong'));
-          if (row) row.classList.add('shake');
-          setTimeout(() => {
-            if (row) row.classList.remove('shake');
-            otpInputs.forEach(i => { i.classList.remove('wrong'); i.value = ''; });
-            otpInputs[0]?.focus();
-          }, 500);
         }
+        
+        otpInputs.forEach(i => i.classList.add('wrong'));
+        if (row) row.classList.add('shake');
+        setTimeout(() => {
+          if (row) row.classList.remove('shake');
+          otpInputs.forEach(i => { i.classList.remove('wrong'); i.value = ''; });
+          otpInputs[0]?.focus();
+        }, 500);
       };
 
       // ─── 5. GOOGLE AUTH (REAL MONGODB PERSISTENCE) ──────────────────────────
       window.handleGoogleAuth = async (account) => {
+        const goFn = window.go || (typeof go !== 'undefined' ? go : null);
+
         try {
           const res = await call('/auth/google', {
             method: 'POST',
             body: {
               name: account.name,
               email: account.email,
-              avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(account.name)}`
+              avatar: account.avatar || ''
             }
           });
 
@@ -705,20 +671,46 @@ export default function LegacyApp({token, onTokenChange}){
             if (onTokenChange) onTokenChange(res.token);
             setTimeout(() => initChatClient(res.token), 100);
 
-            const goFn = window.go || (typeof go !== 'undefined' ? go : null);
-            if (goFn) goFn('screen-account-created');
+            // Always go to feed — works for both new and returning Google users
+            if (typeof window.finishAuthentication === 'function') {
+              window.finishAuthentication('google');
+            } else if (goFn) {
+              goFn('screen-feed');
+            }
           }
         } catch (err) {
           console.error('Google Auth error:', err);
-          alert('Google Sign-in failed: ' + (err.message || 'Please try again.'));
+          // Restore button state
+          document.querySelectorAll('.btn-google').forEach(b => {
+            b.disabled = false;
+            b.style.opacity = '';
+            b.style.pointerEvents = '';
+          });
+          // Show error in the active screen
+          const activeErr = document.querySelector('.screen.active .err');
+          if (activeErr) {
+            activeErr.textContent = err.message || 'Google sign-in failed. Please try again.';
+            activeErr.style.display = 'block';
+            activeErr.style.color = '#ff4d4f';
+          }
         }
       };
 
+      const _setGoogleButtonLoading = (loading) => {
+        document.querySelectorAll('.btn-google').forEach(b => {
+          b.disabled = loading;
+          b.style.opacity = loading ? '0.65' : '';
+          b.style.pointerEvents = loading ? 'none' : '';
+        });
+      };
+
       window.socialLogin = function() {
+        _setGoogleButtonLoading(true);
         triggerGoogleLogin();
       };
 
       window.socialRegister = function() {
+        _setGoogleButtonLoading(true);
         triggerGoogleLogin();
       };
 
@@ -746,7 +738,6 @@ export default function LegacyApp({token, onTokenChange}){
           });
 
           _resetEmail = email;
-          _resetPhone = res.phone || '';
           window.otpContext = 'reset';
 
           const goFn = window.go || (typeof go !== 'undefined' ? go : null);
@@ -755,7 +746,7 @@ export default function LegacyApp({token, onTokenChange}){
             const titleEl = document.getElementById('otp-title');
             if (titleEl) titleEl.textContent = 'Verify Reset Code';
             const copyEl = document.getElementById('otp-copy');
-            if (copyEl) copyEl.textContent = `Enter the 6-digit code sent to ${_resetPhone || 'your registered phone'}`;
+            if (copyEl) copyEl.textContent = `Enter the 6-digit code sent to ${email}`;
             const errEl = document.getElementById('otp-err-msg');
             if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
             startOtpCountdown(60);

@@ -30,7 +30,6 @@
     <form onsubmit="submitRegister(event)">
       <div class="field"><label>Name</label><input id="reg-name" required placeholder="Your name"></div>
       <div class="field"><label>Email</label><input id="reg-email" required type="email" placeholder="you@gmail.com"></div>
-      <div class="field"><label>Phone Number</label><input id="reg-phone" required type="tel" placeholder="+91 98765 43210"></div>
       <div class="field">
         <label>Password</label>
         <div class="pw-f">
@@ -48,15 +47,6 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
           </button>
         </div>
-      </div>
-      <div class="pw-rules-box" id="reg-pw-rules">
-        <div class="pw-rules-title">Password must contain:</div>
-        <div class="pw-rule" id="reg-rule-len"><span class="rule-icon">✕</span> 8 or more characters</div>
-        <div class="pw-rule" id="reg-rule-upper"><span class="rule-icon">✕</span> One uppercase letter (A-Z)</div>
-        <div class="pw-rule" id="reg-rule-lower"><span class="rule-icon">✕</span> One lowercase letter (a-z)</div>
-        <div class="pw-rule" id="reg-rule-num"><span class="rule-icon">✕</span> One number (0-9)</div>
-        <div class="pw-rule" id="reg-rule-spec"><span class="rule-icon">✕</span> One special character (!@#$%^&*...)</div>
-        <div class="pw-rule" id="reg-rule-match" style="display:none;"><span class="rule-icon">✕</span> Passwords match</div>
       </div>
       <p class="err" id="reg-err" style="display:none; text-align:center; margin:6px 0 12px;"></p>
       <button class="btn btn-primary" id="reg-submit-btn" type="submit">Create Account</button>

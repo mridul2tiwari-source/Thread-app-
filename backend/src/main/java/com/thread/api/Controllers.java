@@ -26,6 +26,7 @@ public class Controllers {
   @Autowired Jwt jwt;
   @Autowired EmailService emailService;
   @Autowired SmsService smsService;
+  @Autowired org.springframework.messaging.simp.SimpMessagingTemplate messagingTemplate;
 
   @Value("${thread.admin-password:admin123}")
   String adminPw;
@@ -74,29 +75,22 @@ public class Controllers {
     userMap.put("phoneVerified", u.phoneVerified);
     userMap.put("status", u.status != null ? u.status : "active");
     userMap.put("role", u.role != null ? u.role : "USER");
+    userMap.put("systemKeyboard", u.systemKeyboard);
     return Map.of("token", jwt.make(u.id, "user"), "user", userMap);
   }
 
-  // =========================================================================
-  // 1. SIGN UP / CREATE ACCOUNT (VALIDATES DATA & SENDS REAL SMS OTP VIA TWILIO)
+    // =========================================================================
+  // 1. SIGN UP / CREATE ACCOUNT (EMAIL ONLY)
   // =========================================================================
   @PostMapping({"/auth/register", "/auth/signup", "/auth/register-otp"})
   public ResponseEntity<?> register(@RequestBody Map<String, String> b) {
     String email = b.getOrDefault("email", "").trim().toLowerCase();
-    String rawPhone = b.getOrDefault("phone", b.getOrDefault("phoneNumber", "")).trim();
     String password = b.getOrDefault("password", "");
     String confirmPassword = b.getOrDefault("confirmPassword", b.getOrDefault("confirm_password", ""));
     String name = b.getOrDefault("name", "").trim();
 
     if (!isValidEmail(email)) {
       return err(400, "Please enter a valid email address.");
-    }
-
-    String normalizedPhone;
-    try {
-      normalizedPhone = smsService.normalizePhone(rawPhone);
-    } catch (IllegalArgumentException e) {
-      return err(400, e.getMessage());
     }
 
     String pwdErr = validatePasswordRules(password);
@@ -108,38 +102,17 @@ public class Controllers {
       return err(400, "Passwords do not match.");
     }
 
-    // 1. Check duplicate email (for active/verified user)
-    var existingEmailUser = users.findByEmail(email);
-    if (existingEmailUser.isPresent() && (existingEmailUser.get().phoneVerified || existingEmailUser.get().isActive)) {
+    var existingUser = users.findByEmail(email);
+    if (existingUser.isPresent() && (existingUser.get().emailVerified || existingUser.get().isActive)) {
       return err(409, "An account with this email already exists. Please log in instead.");
     }
 
-    // 2. Check duplicate phone (for active/verified user)
-    var existingPhoneUser = users.findByPhone(normalizedPhone);
-    if (existingPhoneUser.isPresent() && (existingPhoneUser.get().phoneVerified || existingPhoneUser.get().isActive)) {
-      return err(409, "This phone number is already registered. Please log in instead.");
-    }
-
-    // 3. Request SMS OTP from Twilio Verify
-    try {
-      smsService.sendVerification(normalizedPhone);
-    } catch (IllegalStateException e) {
-      return err(429, e.getMessage());
-    } catch (IllegalArgumentException e) {
-      return err(400, e.getMessage());
-    } catch (Exception e) {
-      return err(500, e.getMessage());
-    }
-
-    // 4. Create or update pending unverified user in database
-    AppUser u = existingEmailUser.orElse(existingPhoneUser.orElse(new AppUser()));
+    AppUser u = existingUser.orElse(new AppUser());
     u.name = name.isEmpty() ? email.split("@")[0] : name;
     u.handle = u.name.toLowerCase().replace(" ", ".");
     u.email = email;
-    u.phone = normalizedPhone;
     u.passwordHash = enc.encode(password);
     u.emailVerified = false;
-    u.phoneVerified = false;
     u.status = "pending";
     u.isActive = false;
     u.role = "USER";
@@ -147,82 +120,69 @@ public class Controllers {
     u.updatedAt = Instant.now();
     users.save(u);
 
-    Map<String, Object> res = new HashMap<>();
-    res.put("message", "Verification code sent to " + smsService.maskPhone(normalizedPhone));
-    res.put("phone", normalizedPhone);
-    res.put("email", email);
-    res.put("expiresIn", 300);
-    return ResponseEntity.ok(res);
+    // Generate and send Email OTP
+    String code = String.format("%06d", secureRandom.nextInt(1000000));
+    OtpToken otpToken = otpRepo.findTopByEmailAndPurposeOrderByCreatedAtDesc(email, "SIGNUP").orElse(new OtpToken());
+    otpToken.email = email;
+    otpToken.purpose = "SIGNUP";
+    otpToken.otpHash = enc.encode(code);
+    otpToken.code = code;
+    otpToken.attempts = 0;
+    otpToken.used = false;
+    otpToken.createdAt = Instant.now();
+    otpToken.lastResendAt = Instant.now();
+    otpToken.expiresAt = Instant.now().plusSeconds(300);
+    otpRepo.save(otpToken);
+
+    emailService.sendSignupOtp(email, code);
+
+    return ResponseEntity.ok(Map.of(
+        "message", "Verification code sent to " + email,
+        "email", email,
+        "expiresIn", 300
+    ));
   }
 
   // =========================================================================
-  // 2. VERIFY PHONE OTP & ACTIVATE ACCOUNT
+  // 2. VERIFY EMAIL OTP & ACTIVATE ACCOUNT
   // =========================================================================
   @PostMapping({"/auth/verify-phone", "/auth/verify-email", "/auth/register-verify"})
-  public ResponseEntity<?> verifyPhone(@RequestBody Map<String, String> b) {
+  public ResponseEntity<?> verifyEmail(@RequestBody Map<String, String> b) {
     String email = b.getOrDefault("email", "").trim().toLowerCase();
-    String rawPhone = b.getOrDefault("phone", b.getOrDefault("phoneNumber", "")).trim();
     String code = b.getOrDefault("otp", b.getOrDefault("code", "")).trim();
-    String password = b.getOrDefault("password", "");
-    String name = b.getOrDefault("name", "").trim();
 
-    if (code.isEmpty()) {
-      return err(400, "6-digit verification code is required.");
+    if (code.isEmpty() || email.isEmpty()) {
+      return err(400, "Email and 6-digit verification code are required.");
     }
 
-    String phone = "";
-    if (!rawPhone.isEmpty()) {
-      try {
-        phone = smsService.normalizePhone(rawPhone);
-      } catch (Exception ignored) {}
+    var otpOpt = otpRepo.findTopByEmailAndPurposeAndUsedFalseOrderByCreatedAtDesc(email, "SIGNUP");
+    if (otpOpt.isEmpty() || otpOpt.get().expiresAt.isBefore(Instant.now())) {
+      return err(400, "Verification code is expired or invalid.");
     }
 
-    if (phone.isEmpty() && !email.isEmpty()) {
-      var userOpt = users.findByEmail(email);
-      if (userOpt.isPresent() && userOpt.get().phone != null) {
-        phone = userOpt.get().phone;
-      }
+    OtpToken otpToken = otpOpt.get();
+    if (otpToken.attempts >= 5) {
+      return err(429, "Too many failed attempts. Please request a new code.");
     }
 
-    if (phone.isEmpty()) {
-      return err(400, "Phone number is required for verification.");
-    }
-
-    // Verify SMS OTP with Twilio Verify
-    boolean isVerified;
-    try {
-      isVerified = smsService.checkVerification(phone, code);
-    } catch (IllegalArgumentException e) {
-      return err(400, e.getMessage());
-    } catch (IllegalStateException e) {
-      return err(429, e.getMessage());
-    } catch (Exception e) {
-      return err(500, e.getMessage());
-    }
-
-    if (!isVerified) {
+    if (!enc.matches(code, otpToken.otpHash)) {
+      otpToken.attempts++;
+      otpRepo.save(otpToken);
       return err(400, "Invalid verification code.");
     }
 
-    // OTP accepted: Activate user and mark phoneVerified = true
-    AppUser u = users.findByPhone(phone).orElse(users.findByEmail(email).orElse(new AppUser()));
-    if (u.phone == null || u.phone.isEmpty()) u.phone = phone;
-    if (!email.isEmpty()) u.email = email;
-    if (u.email == null || u.email.isEmpty()) u.email = (u.name != null ? u.name.toLowerCase() : "user") + "@thread.local";
-    if (!name.isEmpty()) u.name = name;
-    if (u.name == null || u.name.isEmpty()) u.name = u.email.split("@")[0];
-    if (u.handle == null || u.handle.isEmpty()) u.handle = u.name.toLowerCase().replace(" ", ".");
-    if (!password.isEmpty()) u.passwordHash = enc.encode(password);
+    otpToken.used = true;
+    otpRepo.save(otpToken);
 
-    u.phoneVerified = true;
+    AppUser u = users.findByEmail(email).orElse(null);
+    if (u == null) return err(404, "User not found.");
+
     u.emailVerified = true;
     u.status = "active";
     u.isActive = true;
-    u.role = "USER";
     u.lastLoginAt = Instant.now();
     u.lastSeen = Instant.now();
     u.updatedAt = Instant.now();
-    if (u.createdAt == null) u.createdAt = Instant.now();
     users.save(u);
 
     Map<String, Object> resp = new HashMap<>(authBody(u));
@@ -231,24 +191,18 @@ public class Controllers {
   }
 
   // =========================================================================
-  // 3. LOGIN (AUTHENTICATES CREDENTIALS & SENDS SMS OTP TO REGISTERED PHONE)
+  // 3. LOGIN (EMAIL + PASSWORD) - NO OTP REQUIRED
   // =========================================================================
   @PostMapping("/auth/login")
   public ResponseEntity<?> login(@RequestBody Map<String, String> b) {
-    String identifier = b.getOrDefault("email", b.getOrDefault("username", b.getOrDefault("phone", ""))).trim().toLowerCase();
+    String email = b.getOrDefault("email", b.getOrDefault("username", "")).trim().toLowerCase();
     String password = b.getOrDefault("password", "");
 
-    if (identifier.isEmpty() || password.isEmpty()) {
-      return err(400, "Email/phone and password are required.");
+    if (email.isEmpty() || password.isEmpty()) {
+      return err(400, "Email and password are required.");
     }
 
-    Optional<AppUser> userOpt = users.findByEmail(identifier);
-    if (userOpt.isEmpty()) {
-      try {
-        String normalized = smsService.normalizePhone(identifier);
-        userOpt = users.findByPhone(normalized);
-      } catch (Exception ignored) {}
-    }
+    Optional<AppUser> userOpt = users.findByEmail(email);
 
     if (userOpt.isEmpty() || !enc.matches(password, userOpt.get().passwordHash)) {
       return err(401, "Invalid email or password.");
@@ -256,89 +210,24 @@ public class Controllers {
 
     AppUser user = userOpt.get();
     if ("suspended".equalsIgnoreCase(user.status) || !user.isActive) {
-      return err(403, "Your account has been suspended. Please contact support.");
-    }
-
-    if (user.phone == null || user.phone.isEmpty()) {
-      // Direct login if user has no phone (legacy account)
-      user.lastLoginAt = Instant.now();
-      user.lastSeen = Instant.now();
-      users.save(user);
-      return ResponseEntity.ok(authBody(user));
-    }
-
-    // Send SMS OTP to user's registered phone
-    try {
-      smsService.sendVerification(user.phone);
-    } catch (IllegalStateException e) {
-      return err(429, e.getMessage());
-    } catch (IllegalArgumentException e) {
-      return err(400, e.getMessage());
-    } catch (Exception e) {
-      return err(500, e.getMessage());
-    }
-
-    return ResponseEntity.ok(Map.of(
-        "requireOtp", true,
-        "email", user.email,
-        "phone", smsService.maskPhone(user.phone),
-        "message", "We've sent a verification code to your registered phone."
-    ));
-  }
-
-  // =========================================================================
-  // 4. VERIFY LOGIN OTP & ISSUE AUTH TOKEN
-  // =========================================================================
-  @PostMapping("/auth/verify-login")
-  public ResponseEntity<?> verifyLogin(@RequestBody Map<String, String> b) {
-    String email = b.getOrDefault("email", "").trim().toLowerCase();
-    String rawPhone = b.getOrDefault("phone", "").trim();
-    String code = b.getOrDefault("otp", b.getOrDefault("code", "")).trim();
-
-    if (code.isEmpty()) {
-      return err(400, "6-digit verification code is required.");
-    }
-
-    Optional<AppUser> userOpt = users.findByEmail(email);
-    if (userOpt.isEmpty() && !rawPhone.isEmpty()) {
-      try {
-        String normalized = smsService.normalizePhone(rawPhone);
-        userOpt = users.findByPhone(normalized);
-      } catch (Exception ignored) {}
-    }
-
-    if (userOpt.isEmpty()) {
-      return err(404, "User not found.");
-    }
-
-    AppUser user = userOpt.get();
-    if (user.phone == null || user.phone.isEmpty()) {
-      return err(400, "No phone number associated with this account.");
-    }
-
-    // Verify code with Twilio
-    boolean isVerified;
-    try {
-      isVerified = smsService.checkVerification(user.phone, code);
-    } catch (IllegalArgumentException e) {
-      return err(400, e.getMessage());
-    } catch (IllegalStateException e) {
-      return err(429, e.getMessage());
-    } catch (Exception e) {
-      return err(500, e.getMessage());
-    }
-
-    if (!isVerified) {
-      return err(400, "Invalid verification code.");
+      return err(403, "Your account is not active or has been suspended.");
     }
 
     user.lastLoginAt = Instant.now();
     user.lastSeen = Instant.now();
     users.save(user);
-
+    
     Map<String, Object> resp = new HashMap<>(authBody(user));
     resp.put("message", "You have successfully logged in.");
     return ResponseEntity.ok(resp);
+  }
+
+  // =========================================================================
+  // 4. VERIFY LOGIN OTP (DUMMY ENDPOINT TO PREVENT BREAKING OLD CLIENTS)
+  // =========================================================================
+  @PostMapping("/auth/verify-login")
+  public ResponseEntity<?> verifyLogin(@RequestBody Map<String, String> b) {
+     return err(400, "Login OTP is no longer used.");
   }
 
   // =========================================================================
@@ -347,47 +236,49 @@ public class Controllers {
   @PostMapping("/auth/resend-otp")
   public ResponseEntity<?> resendOtp(@RequestBody Map<String, String> b) {
     String email = b.getOrDefault("email", "").trim().toLowerCase();
-    String rawPhone = b.getOrDefault("phone", "").trim();
     String purpose = b.getOrDefault("purpose", "SIGNUP").toUpperCase().trim();
 
-    String phone = "";
-    if (!rawPhone.isEmpty()) {
-      try {
-        phone = smsService.normalizePhone(rawPhone);
-      } catch (Exception ignored) {}
+    if (email.isEmpty()) {
+      return err(400, "Email is required to resend verification code.");
     }
 
-    if (phone.isEmpty() && !email.isEmpty()) {
-      var userOpt = users.findByEmail(email);
-      if (userOpt.isPresent() && userOpt.get().phone != null) {
-        phone = userOpt.get().phone;
+    var otpOpt = otpRepo.findTopByEmailAndPurposeOrderByCreatedAtDesc(email, purpose);
+    if (otpOpt.isPresent()) {
+      OtpToken oldToken = otpOpt.get();
+      if (oldToken.lastResendAt != null && oldToken.lastResendAt.plusSeconds(60).isAfter(Instant.now())) {
+        return err(429, "Please wait 60 seconds before requesting a new code.");
       }
     }
 
-    if (phone.isEmpty()) {
-      return err(400, "Phone number is required to resend verification code.");
-    }
+    String code = String.format("%06d", secureRandom.nextInt(1000000));
+    OtpToken otpToken = otpOpt.orElse(new OtpToken());
+    otpToken.email = email;
+    otpToken.purpose = purpose;
+    otpToken.otpHash = enc.encode(code);
+    otpToken.code = code;
+    otpToken.attempts = 0;
+    otpToken.used = false;
+    otpToken.createdAt = Instant.now();
+    otpToken.lastResendAt = Instant.now();
+    otpToken.expiresAt = Instant.now().plusSeconds(300);
+    otpRepo.save(otpToken);
 
-    try {
-      smsService.sendVerification(phone);
-    } catch (IllegalStateException e) {
-      return err(429, e.getMessage());
-    } catch (IllegalArgumentException e) {
-      return err(400, e.getMessage());
-    } catch (Exception e) {
-      return err(500, e.getMessage());
+    if ("PASSWORD_RESET".equals(purpose)) {
+      emailService.sendPasswordResetOtp(email, code);
+    } else {
+      emailService.sendSignupOtp(email, code);
     }
 
     return ResponseEntity.ok(Map.of(
-        "message", "A new verification code has been sent to " + smsService.maskPhone(phone),
-        "phone", smsService.maskPhone(phone),
+        "message", "A new verification code has been sent to " + email,
+        "email", email,
         "expiresIn", 300,
         "cooldown", 60
     ));
   }
 
   // =========================================================================
-  // 6. FORGOT PASSWORD (SENDS OTP TO REGISTERED PHONE)
+  // 6. FORGOT PASSWORD (EMAIL ONLY)
   // =========================================================================
   @PostMapping("/auth/forgot-password")
   public ResponseEntity<?> forgotPassword(@RequestBody Map<String, String> b) {
@@ -397,19 +288,32 @@ public class Controllers {
     }
 
     var userOpt = users.findByEmail(email);
-    if (userOpt.isPresent() && userOpt.get().phone != null && !userOpt.get().phone.isEmpty()) {
-      try {
-        smsService.sendVerification(userOpt.get().phone);
-      } catch (Exception e) {
-        System.err.println("[FORGOT PW] Failed sending SMS OTP: " + e.getMessage());
+    if (userOpt.isPresent() && userOpt.get().isActive) {
+      // Check cooldown
+      var otpOpt = otpRepo.findTopByEmailAndPurposeOrderByCreatedAtDesc(email, "PASSWORD_RESET");
+      if (otpOpt.isPresent() && otpOpt.get().lastResendAt != null && otpOpt.get().lastResendAt.plusSeconds(60).isAfter(Instant.now())) {
+        // Just return success to not reveal timing attacks, or let it pass silently
+      } else {
+        String code = String.format("%06d", secureRandom.nextInt(1000000));
+        OtpToken otpToken = otpOpt.orElse(new OtpToken());
+        otpToken.email = email;
+        otpToken.purpose = "PASSWORD_RESET";
+        otpToken.otpHash = enc.encode(code);
+        otpToken.code = code;
+        otpToken.attempts = 0;
+        otpToken.used = false;
+        otpToken.createdAt = Instant.now();
+        otpToken.lastResendAt = Instant.now();
+        otpToken.expiresAt = Instant.now().plusSeconds(300);
+        otpRepo.save(otpToken);
+        emailService.sendPasswordResetOtp(email, code);
       }
     }
 
     // Generic safe response to prevent email enumeration
     return ResponseEntity.ok(Map.of(
-        "message", "If an account exists for this email, we have sent a verification code to the registered phone.",
-        "email", email,
-        "phone", userOpt.isPresent() && userOpt.get().phone != null ? smsService.maskPhone(userOpt.get().phone) : ""
+        "message", "If an account exists for this email, we have sent a verification code to it.",
+        "email", email
     ));
   }
 
@@ -425,26 +329,29 @@ public class Controllers {
       return err(400, "Email and 6-digit verification code are required.");
     }
 
-    var userOpt = users.findByEmail(email);
-    if (userOpt.isEmpty() || userOpt.get().phone == null || userOpt.get().phone.isEmpty()) {
-      return err(400, "Invalid or expired verification code.");
+    var otpOpt = otpRepo.findTopByEmailAndPurposeAndUsedFalseOrderByCreatedAtDesc(email, "PASSWORD_RESET");
+    if (otpOpt.isEmpty() || otpOpt.get().expiresAt.isBefore(Instant.now())) {
+      return err(400, "Verification code is expired or invalid.");
     }
 
-    boolean isVerified;
-    try {
-      isVerified = smsService.checkVerification(userOpt.get().phone, code);
-    } catch (IllegalArgumentException e) {
-      return err(400, e.getMessage());
-    } catch (IllegalStateException e) {
-      return err(429, e.getMessage());
-    } catch (Exception e) {
-      return err(500, e.getMessage());
+    OtpToken otpToken = otpOpt.get();
+    if (otpToken.attempts >= 5) {
+      return err(429, "Too many failed attempts. Please request a new code.");
     }
 
-    if (!isVerified) {
+    if (!enc.matches(code, otpToken.otpHash)) {
+      otpToken.attempts++;
+      otpRepo.save(otpToken);
       return err(400, "Invalid verification code.");
     }
 
+    // Mark as used, but maybe keep a short lived token for the actual reset?
+    // The requirement says: "After successful OTP verification, allow the user to reset their password"
+    // Usually we generate a resetToken, but for simplicity, we'll mark this token as verified 
+    // and they must submit it again along with the new password, or we just trust the client for the next step.
+    // The original logic just relies on them sending the code again in `/reset-password`.
+    // Let's NOT mark it used yet! Let the reset password endpoint mark it used.
+    
     return ResponseEntity.ok(Map.of(
         "valid", true,
         "message", "Verification code accepted."
@@ -475,22 +382,31 @@ public class Controllers {
     }
 
     var userOpt = users.findByEmail(email);
-    if (userOpt.isEmpty() || userOpt.get().phone == null || userOpt.get().phone.isEmpty()) {
+    if (userOpt.isEmpty()) {
       return err(404, "User account not found.");
     }
-
-    AppUser user = userOpt.get();
-    boolean isVerified;
-    try {
-      isVerified = smsService.checkVerification(user.phone, code);
-    } catch (Exception e) {
-      return err(400, "Invalid or expired verification code.");
+    
+    var otpOpt = otpRepo.findTopByEmailAndPurposeAndUsedFalseOrderByCreatedAtDesc(email, "PASSWORD_RESET");
+    if (otpOpt.isEmpty() || otpOpt.get().expiresAt.isBefore(Instant.now())) {
+      return err(400, "Verification code is expired or invalid.");
     }
-
-    if (!isVerified) {
+    
+    OtpToken otpToken = otpOpt.get();
+    if (otpToken.attempts >= 5) {
+      return err(429, "Too many failed attempts. Please request a new code.");
+    }
+    
+    if (!enc.matches(code, otpToken.otpHash)) {
+      otpToken.attempts++;
+      otpRepo.save(otpToken);
       return err(400, "Invalid verification code.");
     }
 
+    // Success! Update password and invalidate OTP
+    otpToken.used = true;
+    otpRepo.save(otpToken);
+
+    AppUser user = userOpt.get();
     user.passwordHash = enc.encode(password);
     user.updatedAt = Instant.now();
     users.save(user);
@@ -499,6 +415,8 @@ public class Controllers {
         "message", "Your password has been updated. Please log in with your new password."
     ));
   }
+
+
 
   // =========================================================================
   // 9. CURRENT AUTHENTICATED USER SESSION (/auth/me)
@@ -648,6 +566,10 @@ public class Controllers {
     o.get().tick = b.get("tick");
     o.get().updatedAt = Instant.now();
     users.save(o.get());
+    messagingTemplate.convertAndSendToUser(id, "/queue/badge", Map.of(
+        "verified", o.get().tick != null,
+        "badgeType", o.get().tick != null ? o.get().tick : ""
+    ));
     return ResponseEntity.noContent().build();
   }
 
@@ -716,5 +638,34 @@ public class Controllers {
     });
     states.save(d);
     return d.data;
+  }
+  @PutMapping("/users/me/settings")
+  public ResponseEntity<?> updateSettings(@RequestHeader("Authorization") String auth, @RequestBody Map<String, Object> body) {
+    if (auth == null || !auth.startsWith("Bearer ")) return ResponseEntity.status(401).build();
+    String token = auth.substring(7);
+    String userId = jwt.parse(token).getSubject();
+    AppUser user = users.findById(userId).orElse(null);
+    if (user == null) return ResponseEntity.status(404).build();
+
+    if (body.containsKey("systemKeyboard")) {
+      user.systemKeyboard = (Boolean) body.get("systemKeyboard");
+    }
+    users.save(user);
+    return ResponseEntity.ok(user);
+  }
+
+  @GetMapping("/users/{username}")
+  public ResponseEntity<?> getUserByUsername(@PathVariable String username) {
+    AppUser user = users.findByHandle(username).orElse(null);
+    if (user == null) {
+      user = users.findAll().stream().filter(u -> username.equalsIgnoreCase(u.name)).findFirst().orElse(null);
+    }
+    if (user == null) return ResponseEntity.status(404).build();
+    Map<String, Object> res = new HashMap<>();
+    res.put("id", user.id);
+    res.put("name", user.name);
+    res.put("handle", user.handle);
+    res.put("avatar", user.avatar);
+    return ResponseEntity.ok(res);
   }
 }

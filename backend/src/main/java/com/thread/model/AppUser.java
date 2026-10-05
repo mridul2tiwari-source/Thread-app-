@@ -37,5 +37,6 @@ public class AppUser {
   public Instant lastSeen = Instant.now();
   public Instant createdAt = Instant.now();
   public Instant updatedAt = Instant.now();
+  public boolean systemKeyboard = false;
 }
 
