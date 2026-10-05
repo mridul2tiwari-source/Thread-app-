@@ -1,4 +1,4 @@
-import {useEffect, useRef, useState} from 'react';
+﻿import {useEffect, useRef, useState} from 'react';
 import { createPortal } from 'react-dom';
 import { useGoogleLogin } from '@react-oauth/google';
 import body from './legacy/body.html?raw';
@@ -17,7 +17,7 @@ function load(src){return new Promise(r=>{const s=document.createElement('script
 let host = null;
 let booted = false;
 
-// ── State for Auth Flows ───────────────────────────────────────────────────
+// â”€â”€ State for Auth Flows â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let _pendingReg = { name: '', email: '', password: '', confirmPassword: '' };
 let _loginEmail = '';
 let _resetEmail = '';
@@ -56,7 +56,7 @@ function updateProfileUI(user) {
   }
 }
 
-// ── Password Evaluation Helpers ───────────────────────────────────────────
+// â”€â”€ Password Evaluation Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function evaluatePassword(pwd) {
   return {
     len: (pwd || '').length >= 8,
@@ -73,15 +73,15 @@ function updateRuleUI(elId, passed) {
   if (passed) {
     el.classList.add('ok');
     const ic = el.querySelector('.rule-icon');
-    if (ic) ic.textContent = '✓';
+    if (ic) ic.textContent = 'âœ“';
   } else {
     el.classList.remove('ok');
     const ic = el.querySelector('.rule-icon');
-    if (ic) ic.textContent = '✕';
+    if (ic) ic.textContent = 'âœ•';
   }
 }
 
-// ── Password Eye Toggle Helper ─────────────────────────────────────────────
+// â”€â”€ Password Eye Toggle Helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 window.pwEye = function(inputId, btn) {
   const inp = document.getElementById(inputId);
   if (!inp) return;
@@ -94,7 +94,7 @@ window.pwEye = function(inputId, btn) {
   }
 };
 
-// ── Live Register Password Validator ───────────────────────────────────────
+// â”€â”€ Live Register Password Validator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 window.checkRegPassword = function() {
   const p = document.getElementById('reg-pass')?.value || '';
   const cp = document.getElementById('reg-confirm-pass')?.value || '';
@@ -117,7 +117,7 @@ window.checkRegPassword = function() {
   }
 };
 
-// ── Live Reset Password Validator ──────────────────────────────────────────
+// â”€â”€ Live Reset Password Validator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 window.pwCheck = function() {
   const p = document.getElementById('new-pass')?.value || '';
   const cp = document.getElementById('confirm-pass')?.value || '';
@@ -140,7 +140,7 @@ window.pwCheck = function() {
   }
 };
 
-// ── OTP Resend Countdown Timer ─────────────────────────────────────────────
+// â”€â”€ OTP Resend Countdown Timer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function startOtpCountdown(seconds = 60) {
   clearInterval(_otpCountdownTimer);
   let remaining = seconds;
@@ -163,7 +163,7 @@ function startOtpCountdown(seconds = 60) {
   }, 1000);
 }
 
-// ── OTP Input and Navigation Helpers ───────────────────────────────────────
+// â”€â”€ OTP Input and Navigation Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 window.onOtpInput = function(el, idx) {
   el.value = el.value.replace(/[^0-9]/g, '').slice(0, 1);
   const otpInputs = Array.from(document.querySelectorAll('.otp-box'));
@@ -215,24 +215,7 @@ export default function LegacyApp({token, onTokenChange}){
   const containerRef = useRef(null);
   const [postsNode, setPostsNode] = useState(null);
 
-  const triggerGoogleLogin = useGoogleLogin({
-    onSuccess: async (tokenResponse) => {
-      try {
-        const userInfo = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-          headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
-        }).then(res => res.json());
-
-        if (!userInfo || !userInfo.email) {
-          throw new Error('Could not retrieve your Google account info.');
-        }
-
-        if (window.handleGoogleAuth) {
-          window.handleGoogleAuth({
-            name: userInfo.name || userInfo.email.split('@')[0],
-            email: userInfo.email,
-            avatar: userInfo.picture || '',
-            accessToken: tokenResponse.access_token
-          });
+  const triggerGoogleLogin = () => { if (window.handleGoogleAuth) window.handleGoogleAuth(); };
         }
       } catch (e) {
         console.error('Failed to fetch google user info', e);
@@ -254,7 +237,7 @@ export default function LegacyApp({token, onTokenChange}){
     },
     onError: (err) => {
       console.warn('Google OAuth error or cancelled:', err);
-      // Restore button state — user may have just closed the popup
+      // Restore button state â€” user may have just closed the popup
       document.querySelectorAll('.btn-google').forEach(b => {
         b.disabled = false;
         b.style.opacity = '';
@@ -303,7 +286,7 @@ export default function LegacyApp({token, onTokenChange}){
         }
       } catch (e) {}
 
-      // ─── AUTO-REDIRECT & AUTH GUARD ────────────────────────────────────────
+      // â”€â”€â”€ AUTO-REDIRECT & AUTH GUARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const activeToken = token || tok.get('thread_user_jwt');
       const origGo = window.go;
 
@@ -358,7 +341,7 @@ export default function LegacyApp({token, onTokenChange}){
         }
       });
 
-      // ─── LOGOUT HANDLER ───────────────────────────────────────────────────
+      // â”€â”€â”€ LOGOUT HANDLER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       window.stLogout = async function() {
         try {
           await supabase.auth.signOut();
@@ -371,7 +354,7 @@ export default function LegacyApp({token, onTokenChange}){
         if (origGo) origGo('screen-onboarding');
       };
 
-      // ─── REDIRECT / FINISH AUTHENTICATION TO HOME ──────────────────────────
+      // â”€â”€â”€ REDIRECT / FINISH AUTHENTICATION TO HOME â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       window.finishAuthentication = function(mode) {
         clearTimeout(window.__threadAuthHomeTimer);
         try { sessionStorage.setItem('thread-authenticated', '1'); } catch(e) {}
@@ -390,7 +373,7 @@ export default function LegacyApp({token, onTokenChange}){
         } catch(e) {}
       };
 
-      // ─── ADD POST BUTTONS SYNC & OBSERVER ─────────────────────────────────
+      // â”€â”€â”€ ADD POST BUTTONS SYNC & OBSERVER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const topBtn = document.getElementById('ap-go');
       const botBtn = document.getElementById('ap-go-bottom');
       const botText = document.getElementById('ap-go-bottom-text');
@@ -400,7 +383,7 @@ export default function LegacyApp({token, onTokenChange}){
         if (!topBtn) return;
         if (botBtn) botBtn.disabled = topBtn.disabled;
         if (botText) {
-          botText.textContent = topBtn.textContent === 'Posting…' ? 'Posting…' : 'Share Post';
+          botText.textContent = topBtn.textContent === 'Postingâ€¦' ? 'Postingâ€¦' : 'Share Post';
         }
       }
 
@@ -423,7 +406,7 @@ export default function LegacyApp({token, onTokenChange}){
         setTimeout(syncPostButtons, 60);
       };
 
-      // ─── 1. SUBMIT REGISTER (SIGN UP FLOW WITH EMAIL OTP) ──────────────
+      // â”€â”€â”€ 1. SUBMIT REGISTER (SIGN UP FLOW WITH EMAIL OTP) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       window.submitRegister = async function(e) {
         if (e && e.preventDefault) e.preventDefault();
         setErrMsg('screen-register', 'reg-err', '');
@@ -451,7 +434,7 @@ export default function LegacyApp({token, onTokenChange}){
 
         const btn = document.getElementById('reg-submit-btn');
         const origBtnText = btn ? btn.textContent : 'Create Account';
-        if (btn) { btn.disabled = true; btn.textContent = 'Sending email code…'; }
+        if (btn) { btn.disabled = true; btn.textContent = 'Sending email codeâ€¦'; }
 
         try {
           const { error } = await supabase.auth.signUp({
@@ -483,7 +466,7 @@ export default function LegacyApp({token, onTokenChange}){
         }
       };
 
-      // ─── 2. SUBMIT LOGIN (CREDENTIAL CHECK ONLY) ──────────────────
+      // â”€â”€â”€ 2. SUBMIT LOGIN (CREDENTIAL CHECK ONLY) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       window.submitLogin = async function(e) {
         if (e && e.preventDefault) e.preventDefault();
         setErrMsg('screen-login', 'login-err', '');
@@ -498,7 +481,7 @@ export default function LegacyApp({token, onTokenChange}){
 
         const btn = document.getElementById('login-submit-btn');
         const origBtnText = btn ? btn.textContent : 'Log In';
-        if (btn) { btn.disabled = true; btn.textContent = 'Logging in…'; }
+        if (btn) { btn.disabled = true; btn.textContent = 'Logging inâ€¦'; }
 
         try {
           const { data, error } = await supabase.auth.signInWithPassword({
@@ -535,7 +518,7 @@ export default function LegacyApp({token, onTokenChange}){
         }
       };
 
-      // ─── 3. RESEND OTP HANDLER ─────────────────────────────────────────────
+      // â”€â”€â”€ 3. RESEND OTP HANDLER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       window.resendOtpCode = async function() {
         const errEl = document.getElementById('otp-err-msg');
         let targetEmail = '';
@@ -550,7 +533,7 @@ export default function LegacyApp({token, onTokenChange}){
         }
 
         const resendBtn = document.getElementById('otp-resend-btn');
-        if (resendBtn) resendBtn.textContent = 'Sending…';
+        if (resendBtn) resendBtn.textContent = 'Sendingâ€¦';
 
         try {
           const { error } = await supabase.auth.resend({
@@ -576,7 +559,7 @@ export default function LegacyApp({token, onTokenChange}){
         }
       };
 
-      // ─── 4. VERIFY OTP (SIGNUP OR RESET) ───────────────────────────
+      // â”€â”€â”€ 4. VERIFY OTP (SIGNUP OR RESET) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       window.checkOtp = async function(val) {
         const row = document.getElementById('otp-row');
         const otpInputs = Array.from(document.querySelectorAll('.otp-box'));
@@ -584,7 +567,7 @@ export default function LegacyApp({token, onTokenChange}){
         const verifyBtn = document.getElementById('otp-verify-btn');
 
         if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
-        if (verifyBtn) { verifyBtn.disabled = true; verifyBtn.textContent = 'Verifying…'; }
+        if (verifyBtn) { verifyBtn.disabled = true; verifyBtn.textContent = 'Verifyingâ€¦'; }
 
         if (window.otpContext === 'register') {
           try {
@@ -665,7 +648,7 @@ export default function LegacyApp({token, onTokenChange}){
         }, 500);
       };
 
-      // ─── 5. GOOGLE AUTH (REAL MONGODB PERSISTENCE) ──────────────────────────
+      // â”€â”€â”€ 5. GOOGLE AUTH (REAL MONGODB PERSISTENCE) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       window.handleGoogleAuth = async (account) => {
         const goFn = window.go || (typeof go !== 'undefined' ? go : null);
 
@@ -713,7 +696,7 @@ export default function LegacyApp({token, onTokenChange}){
         triggerGoogleLogin();
       };
 
-      // ─── 6. FORGOT PASSWORD (SUBMIT EMAIL FOR RESET CODE) ───────────────────
+      // â”€â”€â”€ 6. FORGOT PASSWORD (SUBMIT EMAIL FOR RESET CODE) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       window.submitForgotEmail = async function(e) {
         if (e && e.preventDefault) e.preventDefault();
         setErrMsg('screen-forgot-email', 'forgot-err', '');
@@ -728,7 +711,7 @@ export default function LegacyApp({token, onTokenChange}){
 
         const btn = document.getElementById('forgot-submit-btn');
         const origBtnText = btn ? btn.textContent : 'Send Code';
-        if (btn) { btn.disabled = true; btn.textContent = 'Sending code…'; }
+        if (btn) { btn.disabled = true; btn.textContent = 'Sending codeâ€¦'; }
 
         try {
           const { error } = await supabase.auth.resetPasswordForEmail(email);
@@ -756,7 +739,7 @@ export default function LegacyApp({token, onTokenChange}){
         }
       };
 
-      // ─── 7. RESET PASSWORD (UPDATE IN MONGODB & SHOW SUCCESS CARD) ─────────
+      // â”€â”€â”€ 7. RESET PASSWORD (UPDATE IN MONGODB & SHOW SUCCESS CARD) â”€â”€â”€â”€â”€â”€â”€â”€â”€
       window.submitReset = async function(e) {
         if (e && e.preventDefault) e.preventDefault();
         const errEl = document.getElementById('reset-error');
@@ -786,7 +769,7 @@ export default function LegacyApp({token, onTokenChange}){
 
         const btn = document.getElementById('reset-submit-btn');
         const origBtnText = btn ? btn.textContent : 'Update Password';
-        if (btn) { btn.disabled = true; btn.textContent = 'Updating password…'; }
+        if (btn) { btn.disabled = true; btn.textContent = 'Updating passwordâ€¦'; }
 
         try {
           const { error } = await supabase.auth.updateUser({ password: newPass });
@@ -821,3 +804,4 @@ export default function LegacyApp({token, onTokenChange}){
     </div>
   );
 }
+
