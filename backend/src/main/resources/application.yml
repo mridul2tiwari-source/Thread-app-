@@ -2,7 +2,8 @@ server:
   port: 8080
   tomcat.max-http-form-post-size: 50MB
 spring:
-  data.mongodb.uri: ${MONGO_URI:mongodb://localhost:27017/thread}
+  data.mongodb.uri: ${MONGODB_URI:mongodb://localhost:27017}
+  data.mongodb.database: ${MONGODB_DATABASE:thread}
   servlet.multipart.max-request-size: 50MB
   mail:
     host: ${EMAIL_HOST:smtp.gmail.com}
