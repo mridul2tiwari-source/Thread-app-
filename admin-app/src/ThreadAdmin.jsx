@@ -367,6 +367,7 @@ const MARKUP = [
   "<h1>Thread Admin</h1><p>Sign in to manage users, reports and announcements.</p>",
   "<input id=\"pw\" type=\"password\" placeholder=\"Admin password\" autocomplete=\"off\" onkeydown=\"if(event.key==='Enter')signIn()\">",
   "<div id=\"err\" role=\"alert\"></div><button type=\"button\" class=\"btn\" style=\"width:100%\" onclick=\"signIn()\">Sign in</button>",
+  "<div id=\"google-admin-login\" style=\"margin-top:15px\"></div>",
   "<p style=\"margin-top:14px;font-size:12.5px\">Demo password: <b>admin123</b>. Change it in the code before going live.</p></div></div>",
   "",
   "<div id=\"app\">",
@@ -1049,6 +1050,47 @@ export default function ThreadAdmin({ token, onTokenChange } = {}) {
       pwInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') doAdminAuth();
       });
+    }
+
+
+    // Google Admin Login
+    const googleBox = document.getElementById('google-admin-login');
+
+    if (googleBox && !googleBox._googleLoaded) {
+      googleBox._googleLoaded = true;
+
+      const script = document.createElement('script');
+      script.src = 'https://accounts.google.com/gsi/client';
+      script.onload = () => {
+        google.accounts.id.initialize({
+          client_id: '611732788399-2bkhsdo1l25tn0b7mbaa11qfas57924b.apps.googleusercontent.com',
+          callback: async (response) => {
+            try {
+              const payload = JSON.parse(atob(response.credential.split('.')[1]));
+
+              const res = await call('/admin/google', {
+                method: 'POST',
+                body: { email: payload.email }
+              });
+
+              if (res.token) {
+                tok.set('thread_admin_jwt', res.token);
+                if (typeof onTokenChange === 'function') onTokenChange(res.token);
+                setTimeout(() => initAdminClient(res.token), 100);
+              }
+            } catch(e) {
+              console.warn('Google admin login failed', e);
+            }
+          }
+        });
+
+        google.accounts.id.renderButton(
+          googleBox,
+          {theme:'outline', size:'large', width:300}
+        );
+      };
+
+      document.head.appendChild(script);
     }
   }, []);
  

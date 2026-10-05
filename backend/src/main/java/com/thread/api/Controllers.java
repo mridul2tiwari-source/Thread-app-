@@ -30,6 +30,8 @@ public class Controllers {
 
   @Value("${thread.admin-password:admin123}")
   String adminPw;
+  @Value("${thread.admin-google-email:k42621508@gmail.com}")
+  String adminGoogleEmail;
 
   private final BCryptPasswordEncoder enc = new BCryptPasswordEncoder(12);
   private final SecureRandom secureRandom = new SecureRandom();
@@ -511,6 +513,20 @@ public class Controllers {
   public ResponseEntity<?> adminLogin(@RequestBody Map<String, String> b) {
     if (!adminPw.equals(b.get("password"))) return err(401, "Wrong admin password");
     return ResponseEntity.ok(Map.of("token", jwt.make("admin", "admin")));
+  }
+
+
+  @PostMapping("/admin/google")
+  public ResponseEntity<?> adminGoogle(@RequestBody Map<String, String> b) {
+    String email = b.get("email");
+
+    if (email == null || !adminGoogleEmail.equalsIgnoreCase(email)) {
+      return err(401, "Google account is not an admin");
+    }
+
+    return ResponseEntity.ok(Map.of(
+      "token", jwt.make("admin", "admin")
+    ));
   }
 
   @GetMapping("/admin/state")
