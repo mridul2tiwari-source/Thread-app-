@@ -226,7 +226,8 @@ export default function LegacyApp({token, onTokenChange}){
           window.handleGoogleAuth({
             name: userInfo.name || userInfo.email.split('@')[0],
             email: userInfo.email,
-            avatar: userInfo.picture || ''
+            avatar: userInfo.picture || '',
+            accessToken: tokenResponse.access_token
           });
         }
       } catch (e) {
@@ -512,10 +513,14 @@ export default function LegacyApp({token, onTokenChange}){
             }
             if (onTokenChange) onTokenChange(res.token);
             setTimeout(() => initChatClient(res.token), 100);
-            const goFn = window.go || (typeof go !== 'undefined' ? go : null);
-            if (goFn) goFn('screen-login-success');
-          }
-        } catch (err) {
+            if (typeof window.finishAuthentication === 'function') {
+              window.finishAuthentication('login');
+            } else {
+              const goFn = window.go || (typeof go !== 'undefined' ? go : null);
+              if (goFn) goFn('screen-feed');
+            }
+            }
+          } catch (err) {
           console.error('Login error:', err);
           setErrMsg('screen-login', 'login-err', err.message || 'Invalid email or password.');
         } finally {
@@ -658,7 +663,8 @@ export default function LegacyApp({token, onTokenChange}){
             body: {
               name: account.name,
               email: account.email,
-              avatar: account.avatar || ''
+              avatar: account.avatar || '',
+              accessToken: account.accessToken
             }
           });
 

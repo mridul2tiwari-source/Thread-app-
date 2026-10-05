@@ -20,9 +20,10 @@ public class WebConfig implements WebMvcConfigurer {
   @Override
   public void addCorsMappings(CorsRegistry r) {
     r.addMapping("/**")
-        .allowedOriginPatterns("*")
+        .allowedOrigins(origins)
         .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
-        .allowedHeaders("*");
+        .allowedHeaders("*")
+        .allowCredentials(true);
   }
 
   @Override
@@ -33,7 +34,7 @@ public class WebConfig implements WebMvcConfigurer {
         if ("OPTIONS".equalsIgnoreCase(q.getMethod())) return true;
         String p = q.getRequestURI();
 
-        boolean admin = p.startsWith("/api/admin/") && !p.equals("/api/admin/login");
+        boolean admin = p.startsWith("/api/admin/") && !p.equals("/api/admin/login") && !p.equals("/api/admin/register") && !p.equals("/api/admin/google");
         boolean userProtected = p.startsWith("/api/me/")
             || p.startsWith("/api/conversations")
             || p.startsWith("/api/users")

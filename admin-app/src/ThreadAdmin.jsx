@@ -364,11 +364,21 @@ const CSS = [
 ].join("\n");
 const MARKUP = [
   "<div id=\"login\"><div class=\"lg\">",
-  "<h1>Thread Admin</h1><p>Sign in to manage users, reports and announcements.</p>",
-  "<input id=\"pw\" type=\"password\" placeholder=\"Admin password\" autocomplete=\"off\" onkeydown=\"if(event.key==='Enter')signIn()\">",
-  "<div id=\"err\" role=\"alert\"></div><button type=\"button\" class=\"btn\" style=\"width:100%\" onclick=\"signIn()\">Sign in</button>",
-  "<div id=\"google-admin-login\" style=\"margin-top:15px\"></div>",
-  "<p style=\"margin-top:14px;font-size:12.5px\">Demo password: <b>admin123</b>. Change it in the code before going live.</p></div></div>",
+  "<h1>Thread Admin</h1>",
+  "<p id=\"lg-sub\">Sign in to manage users, reports and announcements.</p>",
+  "<input id=\"lg-email\" type=\"email\" placeholder=\"Admin email\" autocomplete=\"username\" style=\"margin-bottom:12px\">",
+  "<div id=\"reg-fields\" style=\"display:none;margin-bottom:12px;flex-direction:column;gap:12px\">",
+  "  <input id=\"lg-name\" type=\"text\" placeholder=\"Your name\" autocomplete=\"name\">",
+  "</div>",
+  "<input id=\"pw\" type=\"password\" placeholder=\"Admin password\" autocomplete=\"current-password\" onkeydown=\"if(event.key==='Enter')window.doAdminAuth && window.doAdminAuth()\" style=\"margin-bottom:12px\">",
+  "<div id=\"reg-fields-pw\" style=\"display:none;margin-bottom:12px\">",
+  "  <input id=\"pw-confirm\" type=\"password\" placeholder=\"Confirm password\" autocomplete=\"new-password\">",
+  "</div>",
+  "<div id=\"err\" role=\"alert\"></div><button type=\"button\" id=\"lg-btn\" class=\"btn\" style=\"width:100%\" onclick=\"window.doAdminAuth && window.doAdminAuth()\">Sign in</button>",
+  "<div id=\"google-admin-login\" style=\"margin-top:15px;text-align:center\"></div>",
+  "<p style=\"margin-top:14px;font-size:13px;text-align:center\">",
+  "  <a href=\"#\" id=\"lg-toggle\" onclick=\"if(window.toggleAdminMode)window.toggleAdminMode(event)\" style=\"color:var(--mut);text-decoration:underline\">Need an account? Sign up</a>",
+  "</p></div></div>",
   "",
   "<div id=\"app\">",
   "<aside><div class=\"sbh\"><div class=\"brand\"><i>T</i><div>Thread<br><small>Admin</small></div></div><button type=\"button\" id=\"sbt\" class=\"sbt\" onclick=\"sbTog()\" aria-label=\"Collapse sidebar\" aria-expanded=\"true\" title=\"Collapse sidebar (Ctrl B)\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3\" y=\"4\" width=\"18\" height=\"16\" rx=\"3\"/><path d=\"M9 4v16\"/></svg></button></div>",
@@ -1023,34 +1033,74 @@ export default function ThreadAdmin({ token, onTokenChange } = {}) {
     }
 
     // Non-intrusively hook admin login button to backend
+    const emailInput = document.getElementById('lg-email');
     const pwInput = document.getElementById('pw');
-    const loginBtn = document.querySelector('#login button.btn');
-    const doAdminAuth = async () => {
+    const nameInput = document.getElementById('lg-name');
+    const pwConfirm = document.getElementById('pw-confirm');
+    const loginBtn = document.getElementById('lg-btn');
+
+    window.adminMode = 'login';
+    window.toggleAdminMode = (e) => {
+      if(e) e.preventDefault();
+      window.adminMode = window.adminMode === 'login' ? 'register' : 'login';
+      const regF = document.getElementById('reg-fields');
+      const regFp = document.getElementById('reg-fields-pw');
+      if(regF) regF.style.display = window.adminMode === 'register' ? 'flex' : 'none';
+      if(regFp) regFp.style.display = window.adminMode === 'register' ? 'block' : 'none';
+      if(loginBtn) loginBtn.textContent = window.adminMode === 'register' ? 'Create Admin Account' : 'Sign in';
+      const sub = document.getElementById('lg-sub');
+      if(sub) sub.textContent = window.adminMode === 'register' ? 'Create a new admin account.' : 'Sign in to manage users, reports and announcements.';
+      const tog = document.getElementById('lg-toggle');
+      if(tog) tog.textContent = window.adminMode === 'register' ? 'Already have an account? Log in' : 'Need an account? Sign up';
+      const errEl = document.getElementById('err');
+      if(errEl) errEl.textContent = '';
+    };
+
+    window.doAdminAuth = async () => {
+      const email = emailInput ? emailInput.value.trim() : '';
       const password = pwInput ? pwInput.value.trim() : '';
-      if (password) {
-        try {
-          const res = await call('/admin/login', { method: 'POST', body: { password } });
-          if (res && res.token) {
-            tok.set('thread_admin_jwt', res.token);
-            if (typeof onTokenChange === 'function') onTokenChange(res.token);
-            setTimeout(() => initAdminClient(res.token), 100);
+      const errEl = document.getElementById('err');
+      
+      if(window.adminMode === 'login') {
+        if(email && password){
+          if(loginBtn) { loginBtn.textContent = 'Signing in...'; loginBtn.disabled = true; }
+          try{
+            const res = await call('/admin/login', {method:'POST', body:{email, password}});
+            if(res && res.token){
+              tok.set('thread_admin_jwt', res.token);
+              if (typeof onTokenChange === 'function') onTokenChange(res.token);
+              setTimeout(()=>initAdminClient(res.token), 100);
+            }
+          }catch(e){
+            if(errEl) errEl.textContent = e.message || 'Login failed.';
+          }finally{
+            if(loginBtn) { loginBtn.textContent = 'Sign in'; loginBtn.disabled = false; }
           }
-        } catch (e) {
-          console.warn('Admin backend login failed, continuing with local flow:', e);
+        } else {
+          if(errEl) errEl.textContent = 'Email and password are required.';
+        }
+      } else {
+        const name = nameInput ? nameInput.value.trim() : '';
+        const confirmPassword = pwConfirm ? pwConfirm.value.trim() : '';
+        if(email && password && confirmPassword){
+          if(loginBtn) { loginBtn.textContent = 'Creating account...'; loginBtn.disabled = true; }
+          try{
+            const res = await call('/admin/register', {method:'POST', body:{name, email, password, confirmPassword}});
+            if(res && res.token){
+              tok.set('thread_admin_jwt', res.token);
+              if (typeof onTokenChange === 'function') onTokenChange(res.token);
+              setTimeout(()=>initAdminClient(res.token), 100);
+            }
+          }catch(e){
+            if(errEl) errEl.textContent = e.message || 'Registration failed.';
+          }finally{
+            if(loginBtn) { loginBtn.textContent = 'Create Admin Account'; loginBtn.disabled = false; }
+          }
+        } else {
+          if(errEl) errEl.textContent = 'All fields are required.';
         }
       }
     };
-
-    if (loginBtn && !loginBtn._backendHooked) {
-      loginBtn._backendHooked = true;
-      loginBtn.addEventListener('click', doAdminAuth);
-    }
-    if (pwInput && !pwInput._backendHooked) {
-      pwInput._backendHooked = true;
-      pwInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') doAdminAuth();
-      });
-    }
 
 
     // Google Admin Login
@@ -1063,23 +1113,25 @@ export default function ThreadAdmin({ token, onTokenChange } = {}) {
       script.src = 'https://accounts.google.com/gsi/client';
       script.onload = () => {
         google.accounts.id.initialize({
-          client_id: '611732788399-2bkhsdo1l25tn0b7mbaa11qfas57924b.apps.googleusercontent.com',
+          client_id: (import.meta.env.VITE_GOOGLE_CLIENT_ID || '611732788399-2bkhsdo1l25tn0b7mbaa11qfas57924b.apps.googleusercontent.com'),
           callback: async (response) => {
             try {
               const payload = JSON.parse(atob(response.credential.split('.')[1]));
 
               const res = await call('/admin/google', {
                 method: 'POST',
-                body: { email: payload.email }
+                body: { email: payload.email, idToken: response.credential }
               });
 
-              if (res.token) {
+              if (res && res.token) {
                 tok.set('thread_admin_jwt', res.token);
                 if (typeof onTokenChange === 'function') onTokenChange(res.token);
                 setTimeout(() => initAdminClient(res.token), 100);
               }
             } catch(e) {
               console.warn('Google admin login failed', e);
+              const errEl = document.getElementById('err');
+              if(errEl) errEl.textContent = e.message || 'Google login failed.';
             }
           }
         });

@@ -111,8 +111,9 @@ public class Controllers {
 
     AppUser u = existingUser.orElse(new AppUser());
     u.name = name.isEmpty() ? email.split("@")[0] : name;
-    u.handle = u.name.toLowerCase().replace(" ", ".");
+    u.handle = u.name.toLowerCase().replace(" ", ".") + "-" + UUID.randomUUID().toString().substring(0, 5);
     u.email = email;
+    if (u.phone == null) u.phone = "dummy-" + UUID.randomUUID().toString();
     u.passwordHash = enc.encode(password);
     u.emailVerified = false;
     u.status = "pending";
@@ -455,8 +456,25 @@ public class Controllers {
     String email = b.getOrDefault("email", "").trim().toLowerCase();
     String name  = b.getOrDefault("name", "").trim();
     String avatar = b.getOrDefault("avatar", "");
+    String accessToken = b.getOrDefault("accessToken", "");
 
     if (email.isEmpty()) return err(400, "Google email required");
+
+    // Verify token
+    try {
+      java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+      java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+          .uri(java.net.URI.create("https://www.googleapis.com/oauth2/v3/userinfo"))
+          .header("Authorization", "Bearer " + accessToken)
+          .GET()
+          .build();
+      java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+      if (response.statusCode() != 200) {
+        return err(401, "Invalid Google token");
+      }
+    } catch (Exception e) {
+      return err(500, "Failed to verify Google token");
+    }
 
     var existing = users.findByEmail(email);
     AppUser u;
@@ -475,8 +493,9 @@ public class Controllers {
     } else {
       u = new AppUser();
       u.name = name.isEmpty() ? email.split("@")[0] : name;
-      u.handle = u.name.toLowerCase().replace(" ", ".");
+      u.handle = u.name.toLowerCase().replace(" ", ".") + "-" + UUID.randomUUID().toString().substring(0, 5);
       u.email = email;
+      u.phone = "google-" + UUID.randomUUID().toString();
       u.avatar = avatar;
       u.emailVerified = true;
       u.phoneVerified = true;
@@ -509,24 +528,105 @@ public class Controllers {
   // =========================================================================
   // ADMIN AUTH & USER MANAGEMENT (GET /api/admin/users)
   // =========================================================================
+  @PostMapping("/admin/register")
+  public ResponseEntity<?> adminRegister(@RequestBody Map<String, String> b) {
+    String email = b.getOrDefault("email", "").trim().toLowerCase();
+    String password = b.getOrDefault("password", "");
+    String confirmPassword = b.getOrDefault("confirmPassword", "");
+    String name = b.getOrDefault("name", "").trim();
+
+    if (!isValidEmail(email)) return err(400, "Please enter a valid email address.");
+    String pwdErr = validatePasswordRules(password);
+    if (pwdErr != null) return err(400, pwdErr);
+    if (!password.equals(confirmPassword)) return err(400, "Passwords do not match.");
+
+    var existingUser = users.findByEmail(email);
+    if (existingUser.isPresent()) {
+      return err(409, "An account with this email already exists.");
+    }
+
+    AppUser u = new AppUser();
+    u.name = name.isEmpty() ? email.split("@")[0] : name;
+    u.handle = u.name.toLowerCase().replace(" ", ".") + "-" + UUID.randomUUID().toString().substring(0, 5);
+    u.email = email;
+    u.phone = "admin-" + UUID.randomUUID().toString();
+    u.passwordHash = enc.encode(password);
+    u.emailVerified = true;
+    u.status = "active";
+    u.isActive = true;
+    u.role = "ADMIN";
+    u.createdAt = Instant.now();
+    u.updatedAt = Instant.now();
+    users.save(u);
+
+    return ResponseEntity.ok(Map.of(
+      "message", "Admin account created successfully.",
+      "token", jwt.make(u.id, "admin")
+    ));
+  }
+
   @PostMapping("/admin/login")
   public ResponseEntity<?> adminLogin(@RequestBody Map<String, String> b) {
-    if (!adminPw.equals(b.get("password"))) return err(401, "Wrong admin password");
-    return ResponseEntity.ok(Map.of("token", jwt.make("admin", "admin")));
+    String email = b.getOrDefault("email", "").trim().toLowerCase();
+    String password = b.getOrDefault("password", "");
+
+    if (email.isEmpty() || password.isEmpty()) {
+      return err(400, "Email and password are required.");
+    }
+
+    Optional<AppUser> userOpt = users.findByEmail(email);
+    if (userOpt.isEmpty() || !enc.matches(password, userOpt.get().passwordHash)) {
+      return err(401, "Invalid email or password.");
+    }
+
+    AppUser user = userOpt.get();
+    if (!"ADMIN".equals(user.role)) {
+      return err(403, "You are not authorized to access Thread Admin.");
+    }
+    if ("suspended".equalsIgnoreCase(user.status) || !user.isActive) {
+      return err(403, "Your admin account is disabled.");
+    }
+
+    return ResponseEntity.ok(Map.of("token", jwt.make(user.id, "admin")));
   }
 
 
   @PostMapping("/admin/google")
   public ResponseEntity<?> adminGoogle(@RequestBody Map<String, String> b) {
-    String email = b.get("email");
+    String email = b.getOrDefault("email", "").trim().toLowerCase();
+    String idToken = b.getOrDefault("idToken", "");
 
-    if (email == null || !adminGoogleEmail.equalsIgnoreCase(email)) {
-      return err(401, "Google account is not an admin");
+    if (email.isEmpty()) return err(400, "Google email required");
+
+    // Verify token
+    try {
+      java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+      java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+          .uri(java.net.URI.create("https://oauth2.googleapis.com/tokeninfo?id_token=" + idToken))
+          .GET()
+          .build();
+      java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+      if (response.statusCode() != 200) {
+        return err(401, "Invalid Google token");
+      }
+    } catch (Exception e) {
+      return err(500, "Failed to verify Google token");
     }
 
-    return ResponseEntity.ok(Map.of(
-      "token", jwt.make("admin", "admin")
-    ));
+    Optional<AppUser> userOpt = users.findByEmail(email);
+    if (userOpt.isEmpty()) {
+      return err(403, "You are not authorized to access Thread Admin.");
+    }
+
+    AppUser user = userOpt.get();
+    if (!"ADMIN".equals(user.role)) {
+      return err(403, "You are not authorized to access Thread Admin.");
+    }
+    if ("suspended".equalsIgnoreCase(user.status) || !user.isActive) {
+      return err(403, "Your admin account is disabled.");
+    }
+
+    return ResponseEntity.ok(Map.of("token", jwt.make(user.id, "admin")));
   }
 
   @GetMapping("/admin/state")

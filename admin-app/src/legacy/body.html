@@ -1,9 +1,22 @@
 
 <div id="login"><div class="lg">
-<h1>Thread Admin</h1><p>Sign in to manage users, reports and announcements.</p>
-<input id="pw" type="password" placeholder="Admin password" autocomplete="off" onkeydown="if(event.key==='Enter')signIn()">
-<div id="err" role="alert"></div><button type="button" class="btn" style="width:100%" onclick="signIn()">Sign in</button>
-<p style="margin-top:14px;font-size:12.5px">Demo password: <b>admin123</b>. Change it in the code before going live.</p></div></div>
+<h1>Thread Admin</h1>
+<p id="lg-sub">Sign in to manage users, reports and announcements.</p>
+<input id="lg-email" type="email" placeholder="Admin email" autocomplete="username" style="margin-bottom:12px">
+<div id="reg-fields" style="display:none;margin-bottom:12px;flex-direction:column;gap:12px">
+  <input id="lg-name" type="text" placeholder="Your name" autocomplete="name">
+</div>
+<input id="pw" type="password" placeholder="Admin password" autocomplete="current-password" onkeydown="if(event.key==='Enter')window.doAdminAuth && window.doAdminAuth()" style="margin-bottom:12px">
+<div id="reg-fields-pw" style="display:none;margin-bottom:12px">
+  <input id="pw-confirm" type="password" placeholder="Confirm password" autocomplete="new-password">
+</div>
+<div id="err" role="alert"></div><button type="button" id="lg-btn" class="btn" style="width:100%" onclick="window.doAdminAuth && window.doAdminAuth()">Sign in</button>
+<div id="google-admin-login" style="margin-top:15px;text-align:center">
+  <button type="button" class="btn g" style="width:100%" onclick="if(window.adminGoogleLogin)window.adminGoogleLogin()">Sign in with Google</button>
+</div>
+<p style="margin-top:14px;font-size:13px;text-align:center">
+  <a href="#" id="lg-toggle" onclick="if(window.toggleAdminMode)window.toggleAdminMode(event)" style="color:var(--mut);text-decoration:underline">Need an account? Sign up</a>
+</p></div></div>
 
 <div id="app">
 <aside><div class="brand"><i>T</i><div>Thread<br><small>Admin</small></div></div>
